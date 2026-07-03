@@ -3,8 +3,9 @@
 A thin, opinionated wrapper around `google_storage_bucket` with sane, secure defaults
 (uniform bucket-level access and versioning enabled by default).
 
-This is a **local module** — consumed from `live/**` via a relative `../../../modules/gcs-bucket`
-source. See the repo README for how to consume modules from external repos instead.
+This is a **local module** — consumed from `env/**` via a `${get_repo_root()}/modules/gcs-bucket`
+source (see `env/_envcommon/gcs-bucket.hcl`). See the repo README for how to consume modules
+from external repos instead.
 
 ## Usage
 
