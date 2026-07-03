@@ -1,7 +1,7 @@
 # iac
 
 Infrastructure-as-Code for GCP using **Terraform** + **Terragrunt**, with local emulator
-testing via **floci-gcp** and **plan/apply CI/CD** on GitHub Actions.
+testing via **floci-gcp** and **change-aware plan/apply CI/CD** on GitHub Actions.
 
 ## Layout
 
@@ -13,15 +13,21 @@ testing via **floci-gcp** and **plan/apply CI/CD** on GitHub Actions.
 │   └── network/
 ├── live/                    # Deployable units, one dir per environment
 │   ├── _envcommon/          # Shared per-component config (DRY includes)
-│   ├── dev/
+│   ├── sandbox/
 │   │   ├── env.hcl          # project_id / region / environment
 │   │   ├── network/
 │   │   ├── gcs-bucket/
 │   │   └── external-bucket/ # Consumes a module from an EXTERNAL repo
-│   └── prod/
+│   ├── test/
+│   └── prd/
+├── scripts/                 # Change detection + run wrappers used by make and CI
+│   ├── changed-units.sh
+│   └── tg-run.sh
 ├── test/                    # floci-gcp emulator + `terraform test` suites
 └── .github/workflows/       # test (PR) · plan (PR) · apply (main)
 ```
+
+Environments: **`sandbox`** → **`test`** → **`prd`**, each backed by its own GCP project.
 
 ## Prerequisites
 
@@ -45,15 +51,41 @@ Units declare where their module comes from in `live/_envcommon/*.hcl`:
   ```
   Private repos work the same way over SSH (`git::ssh://git@github.com/...`).
 
+## Change detection
+
+CI does **not** plan/apply everything on every change. `scripts/changed-units.sh`
+diffs a PR (or a merge) against a base ref and prints the affected Terragrunt units for
+one environment; `scripts/tg-run.sh` then runs `terragrunt run-all` scoped to exactly
+those units (`--terragrunt-strict-include`), preserving dependency order and no-op'ing
+when nothing changed.
+
+Blast-radius rules (conservative by design — infra safety over minimal plans):
+
+| Changed path | Affected units |
+| --- | --- |
+| `live/<env>/<unit>/**` | that single unit |
+| `live/_envcommon/<component>.hcl` | the `<component>` unit in the env |
+| `modules/**` | every unit in the env (shared modules are high blast radius) |
+| `root.hcl`, `.tool-versions` | every unit in the env |
+
+```bash
+make changes ENV=test              # list changed units for one env
+make changes-all                   # list changed units across all envs
+BASE=origin/release make changes   # diff against a different base ref
+```
+
 ## Common tasks
 
 ```bash
-make fmt          # format tf + hcl
-make validate     # CI-parity formatting check
-make test         # infra tests against floci-gcp
-make plan  ENV=dev
-make apply ENV=prod
+make fmt                 # format tf + hcl
+make validate            # CI-parity formatting check
+make test                # infra tests against floci-gcp
+make plan  ENV=sandbox   # plan only changed units in one env
+make apply ENV=prd       # apply only changed units in one env
+make plan-all            # plan changed units across sandbox, test, prd
 ```
+
+`ENV` defaults to `sandbox` and `BASE` to `origin/main`.
 
 ## Testing (floci-gcp)
 
@@ -67,12 +99,16 @@ See [`test/README.md`](test/README.md).
 | Workflow | Trigger | Does |
 | --- | --- | --- |
 | `test` | PR | `fmt`/`hclfmt` checks + floci-gcp infra tests |
-| `plan` | PR touching `live/**`, `modules/**` | `terragrunt run-all plan` per env, posted as a PR comment |
-| `apply` | push to `main` | `terragrunt run-all apply`, `dev` then `prod` |
+| `plan` | PR touching `live/**`, `modules/**`, `scripts/**` | Detects changed units per env, plans only those, posts a per-env PR comment |
+| `apply` | push to `main` | Diffs the merged range, applies only changed units, `sandbox` → `test` → `prd` |
+
+Both `plan` and `apply` run a matrix over `sandbox`, `test`, and `prd`; an environment
+with no changes is skipped.
 
 Auth uses **Workload Identity Federation** (no static keys). Configure once:
 
 - Repo variable `GCP_WORKLOAD_IDENTITY_PROVIDER` — the WIF provider resource name.
-- Repo variables `DEV_DEPLOYER_SA` / `PROD_DEPLOYER_SA` — deployer service account emails.
-- GitHub Environments `development` and `production`; add required reviewers to
-  `production` so prod applies pause for manual approval.
+- Repo variables `SANDBOX_DEPLOYER_SA` / `TEST_DEPLOYER_SA` / `PRD_DEPLOYER_SA` — deployer
+  service account emails per environment.
+- GitHub Environments `sandbox`, `test`, `production`; add required reviewers to
+  `production` so prd applies pause for manual approval.
