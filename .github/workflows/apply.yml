@@ -7,6 +7,7 @@ on:
       - "live/**"
       - "modules/**"
       - "root.hcl"
+      - "scripts/**"
       - ".github/workflows/apply.yml"
   workflow_dispatch:
 
@@ -22,15 +23,20 @@ jobs:
   apply:
     name: apply (${{ matrix.environment }})
     runs-on: ubuntu-latest
-    # Deploy dev first, then prod. Prod is gated by the `production` GitHub Environment,
-    # which should require a manual reviewer approval before this job runs.
+    # Roll out sandbox -> test -> prd, one at a time. `production` should be a protected
+    # GitHub Environment requiring manual approval before the prd job runs.
     strategy:
       max-parallel: 1
       matrix:
-        environment: [dev, prod]
-    environment: ${{ matrix.environment == 'prod' && 'production' || 'development' }}
+        include:
+          - { environment: sandbox, gh_environment: sandbox, sa_var: SANDBOX_DEPLOYER_SA }
+          - { environment: test, gh_environment: test, sa_var: TEST_DEPLOYER_SA }
+          - { environment: prd, gh_environment: production, sa_var: PRD_DEPLOYER_SA }
+    environment: ${{ matrix.gh_environment }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -43,12 +49,29 @@ jobs:
             "https://github.com/gruntwork-io/terragrunt/releases/download/v${TG_VERSION}/terragrunt_linux_amd64"
           chmod +x /usr/local/bin/terragrunt
 
+      # Diff the pushed range so we only apply what actually changed in this merge.
+      - name: Resolve diff base
+        id: base
+        run: |
+          base='${{ github.event.before }}'
+          if [ -z "$base" ] || ! git rev-parse --verify --quiet "${base}^{commit}" >/dev/null; then
+            base="HEAD~1"
+          fi
+          echo "ref=$base" >> "$GITHUB_OUTPUT"
+
+      - name: Detect changed units
+        id: detect
+        run: |
+          n="$(./scripts/changed-units.sh '${{ matrix.environment }}' '${{ steps.base.outputs.ref }}' | grep -c . || true)"
+          echo "count=$n" >> "$GITHUB_OUTPUT"
+
       - id: auth
+        if: steps.detect.outputs.count != '0'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars[format('{0}_DEPLOYER_SA', matrix.environment == 'prod' && 'PROD' || 'DEV')] }}
+          service_account: ${{ vars[matrix.sa_var] }}
 
-      - name: terragrunt apply
-        working-directory: live/${{ matrix.environment }}
-        run: terragrunt run-all apply --terragrunt-non-interactive
+      - name: terragrunt apply (changed units only)
+        if: steps.detect.outputs.count != '0'
+        run: ./scripts/tg-run.sh apply '${{ matrix.environment }}' '${{ steps.base.outputs.ref }}'

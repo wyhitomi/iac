@@ -7,6 +7,7 @@ on:
       - "live/**"
       - "modules/**"
       - "root.hcl"
+      - "scripts/**"
       - ".github/workflows/plan.yml"
 
 # WIF needs id-token; the plan is posted back to the PR.
@@ -26,9 +27,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        environment: [dev, prod]
+        include:
+          - { environment: sandbox, sa_var: SANDBOX_DEPLOYER_SA }
+          - { environment: test, sa_var: TEST_DEPLOYER_SA }
+          - { environment: prd, sa_var: PRD_DEPLOYER_SA }
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so we can diff the PR against its base branch.
+          fetch-depth: 0
+
+      - name: Ensure base branch is available for diffing
+        run: git fetch --no-tags origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
 
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -41,21 +51,30 @@ jobs:
             "https://github.com/gruntwork-io/terragrunt/releases/download/v${TG_VERSION}/terragrunt_linux_amd64"
           chmod +x /usr/local/bin/terragrunt
 
-      # Keyless auth via Workload Identity Federation. Configure these repo variables:
-      #   GCP_WORKLOAD_IDENTITY_PROVIDER, and a per-environment service account:
-      #   DEV_DEPLOYER_SA / PROD_DEPLOYER_SA
+      - name: Detect changed units
+        id: detect
+        run: |
+          units="$(./scripts/changed-units.sh '${{ matrix.environment }}' 'origin/${{ github.base_ref }}')"
+          echo "count=$(printf '%s' "$units" | grep -c . || true)" >> "$GITHUB_OUTPUT"
+          { echo "units<<EOF"; echo "$units"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+      # Keyless auth via Workload Identity Federation. Only bother when there is something to plan.
+      # Configure repo variables: GCP_WORKLOAD_IDENTITY_PROVIDER and <ENV>_DEPLOYER_SA.
       - id: auth
+        if: steps.detect.outputs.count != '0'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars[format('{0}_DEPLOYER_SA', matrix.environment == 'prod' && 'PROD' || 'DEV')] }}
+          service_account: ${{ vars[matrix.sa_var] }}
 
-      - name: terragrunt plan
+      - name: terragrunt plan (changed units only)
         id: plan
-        working-directory: live/${{ matrix.environment }}
+        if: steps.detect.outputs.count != '0'
         run: |
           set -o pipefail
-          terragrunt run-all plan --terragrunt-non-interactive --terragrunt-no-color 2>&1 | tee plan.txt
+          BASE="origin/${{ github.base_ref }}" \
+            ./scripts/tg-run.sh plan '${{ matrix.environment }}' "origin/${{ github.base_ref }}" \
+            2>&1 | tee plan.txt
 
       - name: Comment plan on PR
         if: always()
@@ -64,13 +83,29 @@ jobs:
           script: |
             const fs = require('fs');
             const env = '${{ matrix.environment }}';
+            const count = '${{ steps.detect.outputs.count }}';
+            const units = `${{ steps.detect.outputs.units }}`.trim();
             let body;
-            try {
-              const plan = fs.readFileSync(`live/${env}/plan.txt`, 'utf8');
+            if (!count || count === '0') {
+              body = `### Terragrunt plan — \`${env}\`\n\nNo changed units in this environment. ✅`;
+            } else {
+              let plan = '';
+              try { plan = fs.readFileSync('plan.txt', 'utf8'); } catch (e) { plan = '(no plan output captured)'; }
               const clipped = plan.length > 60000 ? plan.slice(-60000) : plan;
-              body = `### Terragrunt plan — \`${env}\` (\`${{ steps.plan.outcome }}\`)\n\n<details><summary>Show plan</summary>\n\n\`\`\`\n${clipped}\n\`\`\`\n\n</details>`;
-            } catch (e) {
-              body = `### Terragrunt plan — \`${env}\`\n\nNo plan output was produced.`;
+              body = [
+                `### Terragrunt plan — \`${env}\` (\`${{ steps.plan.outcome }}\`)`,
+                '',
+                `**Changed units (${count}):**`,
+                '```',
+                units,
+                '```',
+                '<details><summary>Show plan</summary>',
+                '',
+                '```',
+                clipped,
+                '```',
+                '</details>',
+              ].join('\n');
             }
             await github.rest.issues.createComment({
               owner: context.repo.owner,

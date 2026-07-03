@@ -17,7 +17,7 @@ locals {
 inputs = {
   project_id    = local.project_id
   location      = local.env_vars.locals.region
-  force_destroy = local.environment != "prod"
+  force_destroy = local.environment != "prd"
   versioning    = true
   labels = {
     environment = local.environment

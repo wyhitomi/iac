@@ -21,5 +21,5 @@ locals {
 inputs = {
   project_id    = local.project_id
   location      = local.region
-  force_destroy = local.environment != "prod"
+  force_destroy = local.environment != "prd"
 }
