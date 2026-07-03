@@ -1,0 +1,14 @@
+# Local GCP emulator used for infrastructure tests. Terraform/Terragrunt point at
+# http://localhost:4588 so tests exercise real provider calls with no cloud account.
+# https://github.com/floci-io/floci-gcp
+services:
+  floci-gcp:
+    image: ghcr.io/floci-io/floci-gcp:latest
+    container_name: floci-gcp
+    ports:
+      - "4588:4588"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4588/_floci/health"]
+      interval: 3s
+      timeout: 2s
+      retries: 20

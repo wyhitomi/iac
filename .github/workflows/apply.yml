@@ -1,0 +1,54 @@
+name: apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "live/**"
+      - "modules/**"
+      - "root.hcl"
+      - ".github/workflows/apply.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_VERSION: "1.14.5"
+  TG_VERSION: "0.72.6"
+
+jobs:
+  apply:
+    name: apply (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+    # Deploy dev first, then prod. Prod is gated by the `production` GitHub Environment,
+    # which should require a manual reviewer approval before this job runs.
+    strategy:
+      max-parallel: 1
+      matrix:
+        environment: [dev, prod]
+    environment: ${{ matrix.environment == 'prod' && 'production' || 'development' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Install Terragrunt
+        run: |
+          curl -sfLo /usr/local/bin/terragrunt \
+            "https://github.com/gruntwork-io/terragrunt/releases/download/v${TG_VERSION}/terragrunt_linux_amd64"
+          chmod +x /usr/local/bin/terragrunt
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars[format('{0}_DEPLOYER_SA', matrix.environment == 'prod' && 'PROD' || 'DEV')] }}
+
+      - name: terragrunt apply
+        working-directory: live/${{ matrix.environment }}
+        run: terragrunt run-all apply --terragrunt-non-interactive

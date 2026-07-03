@@ -1,0 +1,5 @@
+# Require platform review on all infrastructure changes.
+*           @wyhitomi
+
+# Production changes warrant extra scrutiny.
+/live/prod/ @wyhitomi

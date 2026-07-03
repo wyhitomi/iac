@@ -1,0 +1,34 @@
+# Terraform / Terragrunt
+**/.terraform/*
+.terraform.lock.hcl
+!.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfplan.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terragrunt-cache/
+**/.terragrunt-cache/
+
+# Variables that may contain secrets
+*.tfvars
+!example.tfvars
+*.auto.tfvars
+
+# Credentials
+*.json.key
+credentials.json
+gha-creds-*.json
+.env
+.env.*
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

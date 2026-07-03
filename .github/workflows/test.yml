@@ -1,0 +1,49 @@
+name: test
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: "1.14.5"
+  TG_VERSION: "0.72.6"
+
+jobs:
+  fmt-and-validate:
+    name: fmt & validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Install Terragrunt
+        run: |
+          curl -sfLo /usr/local/bin/terragrunt \
+            "https://github.com/gruntwork-io/terragrunt/releases/download/v${TG_VERSION}/terragrunt_linux_amd64"
+          chmod +x /usr/local/bin/terragrunt
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: terragrunt hcl fmt
+        run: terragrunt hclfmt --terragrunt-check --terragrunt-diff
+
+  infra-test:
+    name: infra test (floci-gcp)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Run infra tests against floci-gcp
+        run: ./test/run.sh
