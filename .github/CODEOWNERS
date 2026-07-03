@@ -2,4 +2,4 @@
 *           @wyhitomi
 
 # Production changes warrant extra scrutiny.
-/live/prd/ @wyhitomi
+/env/gcp/prd/ @wyhitomi

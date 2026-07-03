@@ -3,6 +3,6 @@ include "root" {
 }
 
 include "envcommon" {
-  path   = "${dirname(find_in_parent_folders("root.hcl"))}/live/_envcommon/network.hcl"
+  path   = "${get_repo_root()}/env/_envcommon/network.hcl"
   expose = true
 }

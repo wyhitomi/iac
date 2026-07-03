@@ -1,12 +1,12 @@
 # ---------------------------------------------------------------------------------------------------------------------
-# ROOT TERRAGRUNT CONFIGURATION
-# This file is included by every child terragrunt.hcl via `find_in_parent_folders("root.hcl")`.
-# It wires up remote state, the provider, and common inputs so individual units stay DRY.
+# ROOT TERRAGRUNT CONFIGURATION — gcp cloud target.
+# Included by every unit under env/gcp/**. Wires up GCS remote state and google provider generation.
+# Each cloud gets its own root.hcl (see env/local/root.hcl) so backend/provider wiring can differ
+# per cloud while units and _envcommon stay shared.
 # ---------------------------------------------------------------------------------------------------------------------
 
 locals {
-  # Load environment-level variables (project_id, region, environment name).
-  # Each `live/<env>` directory ships an env.hcl consumed here.
+  # Each env/gcp/<environment> directory ships an env.hcl consumed here.
   env_vars = read_terragrunt_config(find_in_parent_folders("env.hcl"))
 
   project_id  = local.env_vars.locals.project_id
@@ -19,7 +19,7 @@ locals {
 
 # ---------------------------------------------------------------------------------------------------------------------
 # REMOTE STATE
-# GCS backend with a per-unit key derived from the path relative to this repo root.
+# GCS backend with a per-unit key derived from the path relative to this include.
 # ---------------------------------------------------------------------------------------------------------------------
 remote_state {
   backend = "gcs"

@@ -4,9 +4,9 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "live/**"
+      - "env/**"
       - "modules/**"
-      - "root.hcl"
+      - ".tool-versions"
       - "scripts/**"
       - ".github/workflows/plan.yml"
 
@@ -22,15 +22,17 @@ env:
 
 jobs:
   plan:
-    name: plan (${{ matrix.environment }})
+    name: plan (${{ matrix.env_path }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # CI only plans/applies real clouds. `env/local` targets the floci-gcp emulator for
+      # fast local iteration (see README) and is intentionally not part of this matrix.
       matrix:
         include:
-          - { environment: sandbox, sa_var: SANDBOX_DEPLOYER_SA }
-          - { environment: test, sa_var: TEST_DEPLOYER_SA }
-          - { environment: prd, sa_var: PRD_DEPLOYER_SA }
+          - { env_path: gcp/sandbox, sa_var: GCP_SANDBOX_DEPLOYER_SA }
+          - { env_path: gcp/tst, sa_var: GCP_TST_DEPLOYER_SA }
+          - { env_path: gcp/prd, sa_var: GCP_PRD_DEPLOYER_SA }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,12 +56,12 @@ jobs:
       - name: Detect changed units
         id: detect
         run: |
-          units="$(./scripts/changed-units.sh '${{ matrix.environment }}' 'origin/${{ github.base_ref }}')"
+          units="$(./scripts/changed-units.sh '${{ matrix.env_path }}' 'origin/${{ github.base_ref }}')"
           echo "count=$(printf '%s' "$units" | grep -c . || true)" >> "$GITHUB_OUTPUT"
           { echo "units<<EOF"; echo "$units"; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       # Keyless auth via Workload Identity Federation. Only bother when there is something to plan.
-      # Configure repo variables: GCP_WORKLOAD_IDENTITY_PROVIDER and <ENV>_DEPLOYER_SA.
+      # Configure repo variables: GCP_WORKLOAD_IDENTITY_PROVIDER and <matrix.sa_var>.
       - id: auth
         if: steps.detect.outputs.count != '0'
         uses: google-github-actions/auth@v2
@@ -72,8 +74,7 @@ jobs:
         if: steps.detect.outputs.count != '0'
         run: |
           set -o pipefail
-          BASE="origin/${{ github.base_ref }}" \
-            ./scripts/tg-run.sh plan '${{ matrix.environment }}' "origin/${{ github.base_ref }}" \
+          ./scripts/tg-run.sh plan '${{ matrix.env_path }}' "origin/${{ github.base_ref }}" \
             2>&1 | tee plan.txt
 
       - name: Comment plan on PR
@@ -82,18 +83,18 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const env = '${{ matrix.environment }}';
+            const envPath = '${{ matrix.env_path }}';
             const count = '${{ steps.detect.outputs.count }}';
             const units = `${{ steps.detect.outputs.units }}`.trim();
             let body;
             if (!count || count === '0') {
-              body = `### Terragrunt plan — \`${env}\`\n\nNo changed units in this environment. ✅`;
+              body = `### Terragrunt plan — \`${envPath}\`\n\nNo changed units in this environment. ✅`;
             } else {
               let plan = '';
               try { plan = fs.readFileSync('plan.txt', 'utf8'); } catch (e) { plan = '(no plan output captured)'; }
               const clipped = plan.length > 60000 ? plan.slice(-60000) : plan;
               body = [
-                `### Terragrunt plan — \`${env}\` (\`${{ steps.plan.outcome }}\`)`,
+                `### Terragrunt plan — \`${envPath}\` (\`${{ steps.plan.outcome }}\`)`,
                 '',
                 `**Changed units (${count}):**`,
                 '```',

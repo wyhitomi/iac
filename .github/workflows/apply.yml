@@ -4,9 +4,9 @@ on:
   push:
     branches: [main]
     paths:
-      - "live/**"
+      - "env/**"
       - "modules/**"
-      - "root.hcl"
+      - ".tool-versions"
       - "scripts/**"
       - ".github/workflows/apply.yml"
   workflow_dispatch:
@@ -21,17 +21,18 @@ env:
 
 jobs:
   apply:
-    name: apply (${{ matrix.environment }})
+    name: apply (${{ matrix.env_path }})
     runs-on: ubuntu-latest
-    # Roll out sandbox -> test -> prd, one at a time. `production` should be a protected
-    # GitHub Environment requiring manual approval before the prd job runs.
+    # Roll out sandbox -> tst -> prd, one at a time. `production` should be a protected
+    # GitHub Environment requiring manual approval before the prd job runs. `env/local`
+    # targets the floci-gcp emulator for local iteration and is not deployed by CI.
     strategy:
       max-parallel: 1
       matrix:
         include:
-          - { environment: sandbox, gh_environment: sandbox, sa_var: SANDBOX_DEPLOYER_SA }
-          - { environment: test, gh_environment: test, sa_var: TEST_DEPLOYER_SA }
-          - { environment: prd, gh_environment: production, sa_var: PRD_DEPLOYER_SA }
+          - { env_path: gcp/sandbox, gh_environment: sandbox, sa_var: GCP_SANDBOX_DEPLOYER_SA }
+          - { env_path: gcp/tst, gh_environment: tst, sa_var: GCP_TST_DEPLOYER_SA }
+          - { env_path: gcp/prd, gh_environment: production, sa_var: GCP_PRD_DEPLOYER_SA }
     environment: ${{ matrix.gh_environment }}
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +63,7 @@ jobs:
       - name: Detect changed units
         id: detect
         run: |
-          n="$(./scripts/changed-units.sh '${{ matrix.environment }}' '${{ steps.base.outputs.ref }}' | grep -c . || true)"
+          n="$(./scripts/changed-units.sh '${{ matrix.env_path }}' '${{ steps.base.outputs.ref }}' | grep -c . || true)"
           echo "count=$n" >> "$GITHUB_OUTPUT"
 
       - id: auth
@@ -74,4 +75,4 @@ jobs:
 
       - name: terragrunt apply (changed units only)
         if: steps.detect.outputs.count != '0'
-        run: ./scripts/tg-run.sh apply '${{ matrix.environment }}' '${{ steps.base.outputs.ref }}'
+        run: ./scripts/tg-run.sh apply '${{ matrix.env_path }}' '${{ steps.base.outputs.ref }}'

@@ -3,7 +3,7 @@ include "root" {
 }
 
 include "envcommon" {
-  path   = "${dirname(find_in_parent_folders("root.hcl"))}/live/_envcommon/external-bucket.hcl"
+  path   = "${get_repo_root()}/env/_envcommon/external-bucket.hcl"
   expose = true
 }
 

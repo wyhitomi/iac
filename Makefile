@@ -1,9 +1,10 @@
 .DEFAULT_GOAL := help
 
-# Environment to act on (sandbox | test | prd) and the ref changes are diffed against.
-ENV  ?= sandbox
+# ENV is a path relative to env/, e.g. `local`, `gcp/sandbox`, `gcp/tst`, `gcp/prd`.
+# BASE is the ref changes are diffed against.
+ENV  ?= gcp/sandbox
 BASE ?= origin/main
-ENVIRONMENTS := sandbox test prd
+ENVIRONMENTS := local gcp/sandbox gcp/tst gcp/prd
 
 .PHONY: help fmt validate test changes plan apply changes-all plan-all apply-all
 
@@ -22,20 +23,20 @@ validate: ## Check formatting (CI parity)
 test: ## Run infra tests against the floci-gcp emulator
 	./test/run.sh
 
-changes: ## List changed units for one env, e.g. `make changes ENV=test BASE=origin/main`
+changes: ## List changed units for one env, e.g. `make changes ENV=gcp/tst BASE=origin/main`
 	@./scripts/changed-units.sh $(ENV) $(BASE)
 
-plan: ## Plan only changed units for one env, e.g. `make plan ENV=prd`
+plan: ## Plan only changed units for one env, e.g. `make plan ENV=gcp/prd`
 	@./scripts/tg-run.sh plan $(ENV) $(BASE)
 
-apply: ## Apply only changed units for one env, e.g. `make apply ENV=prd`
+apply: ## Apply only changed units for one env, e.g. `make apply ENV=gcp/prd`
 	@./scripts/tg-run.sh apply $(ENV) $(BASE)
 
-changes-all: ## List changed units across every environment
+changes-all: ## List changed units across every environment (all clouds)
 	@for e in $(ENVIRONMENTS); do echo "== $$e =="; ./scripts/changed-units.sh $$e $(BASE) || true; done
 
-plan-all: ## Plan changed units across every environment
+plan-all: ## Plan changed units across every environment (all clouds)
 	@for e in $(ENVIRONMENTS); do ./scripts/tg-run.sh plan $$e $(BASE); done
 
-apply-all: ## Apply changed units across every environment (sandbox -> test -> prd)
+apply-all: ## Apply changed units across every environment (local -> gcp/sandbox -> gcp/tst -> gcp/prd)
 	@for e in $(ENVIRONMENTS); do ./scripts/tg-run.sh apply $$e $(BASE); done
